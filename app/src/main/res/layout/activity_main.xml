@@ -11,6 +11,13 @@
         android:layout_height="wrap_content"
         android:text="@string/select_csv" />
 
+    <com.github.mikephil.charting.charts.LineChart
+        android:id="@+id/lineChart"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:layout_marginTop="12dp"
+        android:background="#FFFFFF" />
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
