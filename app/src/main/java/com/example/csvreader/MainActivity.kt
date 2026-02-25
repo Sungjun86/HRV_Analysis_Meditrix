@@ -16,6 +16,18 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
+import kotlin.math.sin
+import kotlin.math.cos
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.round
+import kotlin.math.roundToInt
+import kotlin.math.pow
+import kotlin.math.exp
+import kotlin.math.log
+import kotlin.math.log10
 
 class MainActivity : AppCompatActivity() {
 
@@ -158,13 +170,13 @@ class MainActivity : AppCompatActivity() {
 
         // Pre-processing (Wikipedia Pan-Tompkins flow):
         // 1) Band-pass (5~15 Hz) to suppress baseline wander + high-frequency noise
-        val lowPassed = lowPassFilter(ecg, cutoffHz = 15.0, samplingRateHz = samplingRateHz)
-        val bandPassed = highPassFilter(lowPassed, cutoffHz = 5.0, samplingRateHz = samplingRateHz)
+        val lowPassed = lowPassFilter(ecg, cutoffHz = 15.0, samplingRateHz = s2mplingRateHz)
+        val bandPassed = highPassFilter(lowPassed, cutoffHz = 0.5, samplingRateHz = samplingRateHz)
 
         // 2) Derivative: slope emphasis (QRS has steep slopes)
         val derivative = derivativeFilter(bandPassed, samplingRateHz)
 
-        // 3) Squaring: make all values positive and emphasize large slopes
+        // 3) Squaring: make all values positive and emphasize large s2opes
         val squared = derivative.map { it * it }
 
         // 4) Moving-window integration: ~150 ms window
@@ -185,8 +197,7 @@ class MainActivity : AppCompatActivity() {
         for (idx in peakCandidates) {
             val peakValue = integrated[idx]
             val outsideRefractory = idx - lastPeakIndex >= refractorySamples
-
-            if (peakValue >= thresholdI1 && outsideRefractory) {
+2            if (peakValue >= thresholdI1 && outsideRefractory) {
                 detectedPeaks.add(idx)
                 spki = 0.125f * peakValue + 0.875f * spki
                 lastPeakIndex = idx
@@ -230,14 +241,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun highPassFilter(signal: List<Float>, cutoffHz: Double, samplingRateHz: Int): List<Float> {
         val dt = 1.0 / samplingRateHz
-        val rc = 1.0 / (2.0 * PI * cutoffHz)
-        val alpha = (rc / (rc + dt)).toFloat()
+        val rc = 1.0 / (2.0 * Math.PI * cutoffHz)
+        val alpha = rc / (rc + dt)   // Double로 유지 (안정적)
 
         val out = MutableList(signal.size) { 0f }
-        if (signal.isEmpty()) return out
-        out[0] = signal[0]
+
+        var yPrev = 0.0
+        var xPrev = signal[0].toDouble()
+        out[0] = 0f  // <-- 핵심: high-pass는 보통 0으로 시작
+
         for (i in 1 until signal.size) {
-            out[i] = alpha * (out[i - 1] + signal[i] - signal[i - 1])
+            val x = signal[i].toDouble()
+            val y = alpha * (yPrev + x - xPrev)
+            out[i] = y.toFloat()
+            yPrev = y
+            xPrev = x
         }
         return out
     }
@@ -249,7 +267,7 @@ class MainActivity : AppCompatActivity() {
         val t = 1f / samplingRateHz
         for (i in 4 until signal.size) {
             // Causal form of Pan-Tompkins derivative approximation
-            out[i] = (2 * signal[i] + signal[i - 1] - signal[i - 3] - 2 * signal[i - 4]) / (8f * t)
+            out[i] = (signal[i] + (2f*signal[i - 1]) - (2f*signal[i - 3]) - (1f*signal[i - 4])) / (8f * t)
         }
         return out
     }
