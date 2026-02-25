@@ -1,10 +1,14 @@
 <resources>
     <string name="app_name">CSV Reader</string>
     <string name="select_csv">CSV 파일 선택</string>
+    <string name="save_rr_csv">RR Interval CSV 저장</string>
     <string name="default_guide">버튼을 눌러 CSV 파일을 선택하세요.</string>
     <string name="empty_csv">CSV 파일이 비어 있습니다.</string>
     <string name="cannot_open_file">파일을 열 수 없습니다.</string>
     <string name="no_numeric_data">CSV에서 숫자형 ECG 데이터를 찾지 못했습니다.</string>
+    <string name="no_rr_data_to_save">저장할 RR interval 데이터가 없습니다. 먼저 CSV를 분석하세요.</string>
+    <string name="rr_csv_saved">RR interval CSV 저장 완료</string>
+    <string name="rr_csv_save_failed">RR interval CSV 저장 실패</string>
     <string name="pan_tompkins_default">Pan &amp; Tompkins 결과가 여기에 표시됩니다.</string>
     <string name="no_detected_peak">검출된 피크 없음</string>
     <string name="raw_chart_title">1) Raw ECG Line Chart</string>

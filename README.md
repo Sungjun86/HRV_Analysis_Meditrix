@@ -9,6 +9,7 @@
 4. 각 행에서 숫자로 변환 가능한 첫 번째 값을 ECG 값으로 추출
 5. 1번 차트에 Raw ECG를 출력
 6. Pan & Tompkins 처리 결과(전처리 + 파생 신호)를 2번 차트와 텍스트 요약으로 출력
+7. `RR Interval CSV 저장` 버튼으로 RR interval 결과를 CSV 파일로 저장
 
 ## Pan & Tompkins 처리(샘플링 500Hz)
 - Pre-Processing: Band-pass (HPF 5Hz + LPF 15Hz)
@@ -17,10 +18,14 @@
 - Moving Window Integration (150ms)
 - Adaptive Threshold (SPKI/NPKI 기반) + Refractory period(200ms)
 
+## RR Interval 저장 CSV 포맷
+- 헤더: `index,rr_interval_samples,rr_interval_ms`
+- 각 행: RR interval의 샘플 수 및 ms 변환값
+
 ## 출력 정보
 - Raw ECG Line Chart
 - Pan & Tompkins Processed Chart(적분 신호)
-- Pan & Tompkins 텍스트 결과(Sampling rate, Threshold, R-peak 개수, 추정 BPM, 피크 index)
+- Pan & Tompkins 텍스트 결과(Sampling rate, Threshold, R-peak 개수, RR interval, 추정 BPM, 피크 index)
 
 ## 실행 방법
 1. Android Studio에서 이 폴더 열기

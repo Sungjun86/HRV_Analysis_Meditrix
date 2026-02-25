@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.github.mikephil.charting.charts.LineChart
@@ -14,6 +15,9 @@ import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import kotlin.math.PI
+import kotlin.math.roundToInt
 import kotlin.math.PI
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -36,10 +40,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rawChart: LineChart
     private lateinit var processedChart: LineChart
 
+    private var latestRrIntervalsSamples: List<Int> = emptyList()
+    private var latestSamplingRateHz: Int = 500
+
     private val openCsvLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { readCsvFile(it) }
+    }
+
+    private val saveRrCsvLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        uri?.let { saveRrIntervalsToCsv(it) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,8 +68,18 @@ class MainActivity : AppCompatActivity() {
         setupChart(processedChart, getString(R.string.processed_chart_description))
 
         val selectButton: Button = findViewById(R.id.btnSelectCsv)
+        val saveRrButton: Button = findViewById(R.id.btnSaveRrCsv)
+
         selectButton.setOnClickListener {
             openCsvLauncher.launch(arrayOf("text/*", "application/vnd.ms-excel"))
+        }
+
+        saveRrButton.setOnClickListener {
+            if (latestRrIntervalsSamples.isEmpty()) {
+                Toast.makeText(this, getString(R.string.no_rr_data_to_save), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            saveRrCsvLauncher.launch("rr_intervals.csv")
         }
     }
 
@@ -96,6 +119,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (ecgValues.isEmpty()) {
+                latestRrIntervalsSamples = emptyList()
                 panTompkinsTextView.text = getString(R.string.no_numeric_data)
                 rawChart.clear()
                 processedChart.clear()
@@ -112,6 +136,8 @@ class MainActivity : AppCompatActivity() {
             )
 
             val panTompkinsResult = runPanTompkins(ecgValues, samplingRateHz = 500)
+            latestRrIntervalsSamples = panTompkinsResult.rrIntervalsSamples
+            latestSamplingRateHz = panTompkinsResult.samplingRateHz
 
             renderChart(
                 chart = processedChart,
@@ -122,12 +148,31 @@ class MainActivity : AppCompatActivity() {
 
             panTompkinsTextView.text = buildPanTompkinsSummary(panTompkinsResult)
         } ?: run {
+            latestRrIntervalsSamples = emptyList()
             resultTextView.text = getString(R.string.cannot_open_file)
             panTompkinsTextView.text = getString(R.string.cannot_open_file)
             rawChart.clear()
             processedChart.clear()
             rawChart.invalidate()
             processedChart.invalidate()
+        }
+    }
+
+    private fun saveRrIntervalsToCsv(uri: Uri) {
+        runCatching {
+            contentResolver.openOutputStream(uri)?.use { outputStream ->
+                OutputStreamWriter(outputStream).use { writer ->
+                    writer.appendLine("index,rr_interval_samples,rr_interval_ms")
+                    latestRrIntervalsSamples.forEachIndexed { index, rrSamples ->
+                        val rrMs = rrSamples * 1000.0 / latestSamplingRateHz
+                        writer.appendLine("$index,$rrSamples,${"%.2f".format(rrMs)}")
+                    }
+                }
+            }
+        }.onSuccess {
+            Toast.makeText(this, getString(R.string.rr_csv_saved), Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            Toast.makeText(this, getString(R.string.rr_csv_save_failed), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -162,28 +207,21 @@ class MainActivity : AppCompatActivity() {
             return PanTompkinsResult(
                 integratedSignal = emptyList(),
                 peakIndices = emptyList(),
+                rrIntervalsSamples = emptyList(),
                 threshold = 0f,
                 estimatedHeartRate = 0,
                 samplingRateHz = samplingRateHz
             )
         }
 
-        // Pre-processing (Wikipedia Pan-Tompkins flow):
-        // 1) Band-pass (5~15 Hz) to suppress baseline wander + high-frequency noise
-        val lowPassed = lowPassFilter(ecg, cutoffHz = 15.0, samplingRateHz = s2mplingRateHz)
-        val bandPassed = highPassFilter(lowPassed, cutoffHz = 0.5, samplingRateHz = samplingRateHz)
-
-        // 2) Derivative: slope emphasis (QRS has steep slopes)
+        val lowPassed = lowPassFilter(ecg, cutoffHz = 15.0, samplingRateHz = samplingRateHz)
+        val bandPassed = highPassFilter(lowPassed, cutoffHz = 5.0, samplingRateHz = samplingRateHz)
         val derivative = derivativeFilter(bandPassed, samplingRateHz)
-
-        // 3) Squaring: make all values positive and emphasize large s2opes
         val squared = derivative.map { it * it }
 
-        // 4) Moving-window integration: ~150 ms window
         val windowSize = (0.15 * samplingRateHz).roundToInt().coerceAtLeast(1)
         val integrated = movingAverage(squared, windowSize)
 
-        // 5) Adaptive thresholding (SPKI/NPKI style)
         val peakCandidates = findLocalPeaks(integrated)
         val initialSegment = integrated.take((2.0 * samplingRateHz).roundToInt().coerceAtMost(integrated.size))
         var spki = (initialSegment.maxOrNull() ?: 0f) * 0.25f
@@ -197,7 +235,8 @@ class MainActivity : AppCompatActivity() {
         for (idx in peakCandidates) {
             val peakValue = integrated[idx]
             val outsideRefractory = idx - lastPeakIndex >= refractorySamples
-2            if (peakValue >= thresholdI1 && outsideRefractory) {
+
+            if (peakValue >= thresholdI1 && outsideRefractory) {
                 detectedPeaks.add(idx)
                 spki = 0.125f * peakValue + 0.875f * spki
                 lastPeakIndex = idx
@@ -219,6 +258,7 @@ class MainActivity : AppCompatActivity() {
         return PanTompkinsResult(
             integratedSignal = integrated,
             peakIndices = detectedPeaks,
+            rrIntervalsSamples = rrIntervals,
             threshold = thresholdI1,
             estimatedHeartRate = estimatedHeartRate,
             samplingRateHz = samplingRateHz
@@ -306,12 +346,23 @@ class MainActivity : AppCompatActivity() {
             result.peakIndices.take(20).joinToString(", ")
         }
 
+        val rrPreview = if (result.rrIntervalsSamples.isEmpty()) {
+            getString(R.string.no_detected_peak)
+        } else {
+            result.rrIntervalsSamples.take(10).joinToString(", ") { rr ->
+                val rrMs = rr * 1000.0 / result.samplingRateHz
+                "${"%.1f".format(rrMs)}ms"
+            }
+        }
+
         return """
             [Pan & Tompkins 결과]
             - Sampling Rate: ${result.samplingRateHz} Hz
             - Pre-Processing: Band-pass (HPF 5Hz + LPF 15Hz), Derivative, Squaring, MWI(150ms)
             - Adaptive Threshold: ${"%.5f".format(result.threshold)}
             - 검출된 R-peak 수: ${result.peakIndices.size}
+            - RR interval 수: ${result.rrIntervalsSamples.size}
+            - RR 미리보기(최대 10개): $rrPreview
             - 추정 심박수(BPM): ${result.estimatedHeartRate}
             - R-peak Index(최대 20개): $peaksPreview
         """.trimIndent()
@@ -321,6 +372,7 @@ class MainActivity : AppCompatActivity() {
 data class PanTompkinsResult(
     val integratedSignal: List<Float>,
     val peakIndices: List<Int>,
+    val rrIntervalsSamples: List<Int>,
     val threshold: Float,
     val estimatedHeartRate: Int,
     val samplingRateHz: Int
