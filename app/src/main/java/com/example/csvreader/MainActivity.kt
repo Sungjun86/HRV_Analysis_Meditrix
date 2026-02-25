@@ -14,6 +14,7 @@ import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import kotlin.math.PI
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
@@ -98,7 +99,7 @@ class MainActivity : AppCompatActivity() {
                 label = "Raw ECG"
             )
 
-            val panTompkinsResult = runPanTompkins(ecgValues)
+            val panTompkinsResult = runPanTompkins(ecgValues, samplingRateHz = 500)
 
             renderChart(
                 chart = processedChart,
@@ -144,59 +145,140 @@ class MainActivity : AppCompatActivity() {
         chart.invalidate()
     }
 
-    private fun runPanTompkins(ecg: List<Float>): PanTompkinsResult {
-        val mean = ecg.average().toFloat()
-        val centered = ecg.map { it - mean }
-
-        val derivative = MutableList(centered.size) { 0f }
-        for (i in 1 until centered.size) {
-            derivative[i] = centered[i] - centered[i - 1]
+    private fun runPanTompkins(ecg: List<Float>, samplingRateHz: Int): PanTompkinsResult {
+        if (ecg.size < samplingRateHz / 2) {
+            return PanTompkinsResult(
+                integratedSignal = emptyList(),
+                peakIndices = emptyList(),
+                threshold = 0f,
+                estimatedHeartRate = 0,
+                samplingRateHz = samplingRateHz
+            )
         }
 
+        // Pre-processing (Wikipedia Pan-Tompkins flow):
+        // 1) Band-pass (5~15 Hz) to suppress baseline wander + high-frequency noise
+        val lowPassed = lowPassFilter(ecg, cutoffHz = 15.0, samplingRateHz = samplingRateHz)
+        val bandPassed = highPassFilter(lowPassed, cutoffHz = 5.0, samplingRateHz = samplingRateHz)
+
+        // 2) Derivative: slope emphasis (QRS has steep slopes)
+        val derivative = derivativeFilter(bandPassed, samplingRateHz)
+
+        // 3) Squaring: make all values positive and emphasize large slopes
         val squared = derivative.map { it * it }
 
-        val windowSize = 12
-        val integrated = MutableList(squared.size) { 0f }
-        var runningSum = 0f
-        for (i in squared.indices) {
-            runningSum += squared[i]
-            if (i >= windowSize) {
-                runningSum -= squared[i - windowSize]
+        // 4) Moving-window integration: ~150 ms window
+        val windowSize = (0.15 * samplingRateHz).roundToInt().coerceAtLeast(1)
+        val integrated = movingAverage(squared, windowSize)
+
+        // 5) Adaptive thresholding (SPKI/NPKI style)
+        val peakCandidates = findLocalPeaks(integrated)
+        val initialSegment = integrated.take((2.0 * samplingRateHz).roundToInt().coerceAtMost(integrated.size))
+        var spki = (initialSegment.maxOrNull() ?: 0f) * 0.25f
+        var npki = initialSegment.average().toFloat() * 0.5f
+        var thresholdI1 = npki + 0.25f * (spki - npki)
+
+        val refractorySamples = (0.2 * samplingRateHz).roundToInt()
+        val detectedPeaks = mutableListOf<Int>()
+        var lastPeakIndex = -refractorySamples
+
+        for (idx in peakCandidates) {
+            val peakValue = integrated[idx]
+            val outsideRefractory = idx - lastPeakIndex >= refractorySamples
+
+            if (peakValue >= thresholdI1 && outsideRefractory) {
+                detectedPeaks.add(idx)
+                spki = 0.125f * peakValue + 0.875f * spki
+                lastPeakIndex = idx
+            } else {
+                npki = 0.125f * peakValue + 0.875f * npki
             }
-            val divisor = if (i + 1 < windowSize) i + 1 else windowSize
-            integrated[i] = runningSum / divisor
+
+            thresholdI1 = npki + 0.25f * (spki - npki)
         }
 
-        val threshold = (integrated.maxOrNull() ?: 0f) * 0.35f
-        val refractory = 20
-        val peakIndices = mutableListOf<Int>()
-        var lastPeak = -refractory
-
-        for (i in 1 until integrated.size - 1) {
-            val isLocalPeak = integrated[i] > integrated[i - 1] && integrated[i] >= integrated[i + 1]
-            val passesThreshold = integrated[i] > threshold
-            val outsideRefractory = i - lastPeak >= refractory
-
-            if (isLocalPeak && passesThreshold && outsideRefractory) {
-                peakIndices.add(i)
-                lastPeak = i
-            }
-        }
-
-        val rrIntervals = peakIndices.zipWithNext { a, b -> b - a }
+        val rrIntervals = detectedPeaks.zipWithNext { a, b -> b - a }
         val avgRr = rrIntervals.averageOrNull() ?: 0.0
         val estimatedHeartRate = if (avgRr > 0) {
-            (60.0 * 250.0 / avgRr).roundToInt()
+            (60.0 * samplingRateHz / avgRr).roundToInt()
         } else {
             0
         }
 
         return PanTompkinsResult(
             integratedSignal = integrated,
-            peakIndices = peakIndices,
-            threshold = threshold,
-            estimatedHeartRate = estimatedHeartRate
+            peakIndices = detectedPeaks,
+            threshold = thresholdI1,
+            estimatedHeartRate = estimatedHeartRate,
+            samplingRateHz = samplingRateHz
         )
+    }
+
+    private fun lowPassFilter(signal: List<Float>, cutoffHz: Double, samplingRateHz: Int): List<Float> {
+        val dt = 1.0 / samplingRateHz
+        val rc = 1.0 / (2.0 * PI * cutoffHz)
+        val alpha = (dt / (rc + dt)).toFloat()
+
+        val out = MutableList(signal.size) { 0f }
+        if (signal.isEmpty()) return out
+        out[0] = signal[0]
+        for (i in 1 until signal.size) {
+            out[i] = out[i - 1] + alpha * (signal[i] - out[i - 1])
+        }
+        return out
+    }
+
+    private fun highPassFilter(signal: List<Float>, cutoffHz: Double, samplingRateHz: Int): List<Float> {
+        val dt = 1.0 / samplingRateHz
+        val rc = 1.0 / (2.0 * PI * cutoffHz)
+        val alpha = (rc / (rc + dt)).toFloat()
+
+        val out = MutableList(signal.size) { 0f }
+        if (signal.isEmpty()) return out
+        out[0] = signal[0]
+        for (i in 1 until signal.size) {
+            out[i] = alpha * (out[i - 1] + signal[i] - signal[i - 1])
+        }
+        return out
+    }
+
+    private fun derivativeFilter(signal: List<Float>, samplingRateHz: Int): List<Float> {
+        val out = MutableList(signal.size) { 0f }
+        if (signal.size < 5) return out
+
+        val t = 1f / samplingRateHz
+        for (i in 4 until signal.size) {
+            // Causal form of Pan-Tompkins derivative approximation
+            out[i] = (2 * signal[i] + signal[i - 1] - signal[i - 3] - 2 * signal[i - 4]) / (8f * t)
+        }
+        return out
+    }
+
+    private fun movingAverage(signal: List<Float>, windowSize: Int): List<Float> {
+        val out = MutableList(signal.size) { 0f }
+        if (signal.isEmpty()) return out
+
+        var runningSum = 0f
+        for (i in signal.indices) {
+            runningSum += signal[i]
+            if (i >= windowSize) {
+                runningSum -= signal[i - windowSize]
+            }
+            val divisor = if (i + 1 < windowSize) i + 1 else windowSize
+            out[i] = runningSum / divisor
+        }
+        return out
+    }
+
+    private fun findLocalPeaks(signal: List<Float>): List<Int> {
+        if (signal.size < 3) return emptyList()
+        val peaks = mutableListOf<Int>()
+        for (i in 1 until signal.lastIndex) {
+            if (signal[i] > signal[i - 1] && signal[i] >= signal[i + 1]) {
+                peaks.add(i)
+            }
+        }
+        return peaks
     }
 
     private fun buildPanTompkinsSummary(result: PanTompkinsResult): String {
@@ -208,7 +290,9 @@ class MainActivity : AppCompatActivity() {
 
         return """
             [Pan & Tompkins 결과]
-            - Threshold: ${"%.5f".format(result.threshold)}
+            - Sampling Rate: ${result.samplingRateHz} Hz
+            - Pre-Processing: Band-pass (HPF 5Hz + LPF 15Hz), Derivative, Squaring, MWI(150ms)
+            - Adaptive Threshold: ${"%.5f".format(result.threshold)}
             - 검출된 R-peak 수: ${result.peakIndices.size}
             - 추정 심박수(BPM): ${result.estimatedHeartRate}
             - R-peak Index(최대 20개): $peaksPreview
@@ -220,7 +304,8 @@ data class PanTompkinsResult(
     val integratedSignal: List<Float>,
     val peakIndices: List<Int>,
     val threshold: Float,
-    val estimatedHeartRate: Int
+    val estimatedHeartRate: Int,
+    val samplingRateHz: Int
 )
 
 private fun List<Int>.averageOrNull(): Double? {
