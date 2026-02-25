@@ -18,6 +18,20 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.PI
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
+import kotlin.math.sin
+import kotlin.math.cos
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.round
+import kotlin.math.roundToInt
+import kotlin.math.pow
+import kotlin.math.exp
+import kotlin.math.log
+import kotlin.math.log10
 
 class MainActivity : AppCompatActivity() {
 
@@ -267,14 +281,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun highPassFilter(signal: List<Float>, cutoffHz: Double, samplingRateHz: Int): List<Float> {
         val dt = 1.0 / samplingRateHz
-        val rc = 1.0 / (2.0 * PI * cutoffHz)
-        val alpha = (rc / (rc + dt)).toFloat()
+        val rc = 1.0 / (2.0 * Math.PI * cutoffHz)
+        val alpha = rc / (rc + dt)   // Double로 유지 (안정적)
 
         val out = MutableList(signal.size) { 0f }
-        if (signal.isEmpty()) return out
-        out[0] = signal[0]
+
+        var yPrev = 0.0
+        var xPrev = signal[0].toDouble()
+        out[0] = 0f  // <-- 핵심: high-pass는 보통 0으로 시작
+
         for (i in 1 until signal.size) {
-            out[i] = alpha * (out[i - 1] + signal[i] - signal[i - 1])
+            val x = signal[i].toDouble()
+            val y = alpha * (yPrev + x - xPrev)
+            out[i] = y.toFloat()
+            yPrev = y
+            xPrev = x
         }
         return out
     }
@@ -285,7 +306,8 @@ class MainActivity : AppCompatActivity() {
 
         val t = 1f / samplingRateHz
         for (i in 4 until signal.size) {
-            out[i] = (2 * signal[i] + signal[i - 1] - signal[i - 3] - 2 * signal[i - 4]) / (8f * t)
+            // Causal form of Pan-Tompkins derivative approximation
+            out[i] = (signal[i] + (2f*signal[i - 1]) - (2f*signal[i - 3]) - (1f*signal[i - 4])) / (8f * t)
         }
         return out
     }
