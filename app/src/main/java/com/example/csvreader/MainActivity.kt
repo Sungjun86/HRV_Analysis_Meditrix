@@ -164,8 +164,9 @@ class MainActivity : AppCompatActivity() {
                 OutputStreamWriter(outputStream).use { writer ->
                     writer.appendLine("index,rr_interval_samples,rr_interval_ms")
                     latestRrIntervalsSamples.forEachIndexed { index, rrSamples ->
+                        val rrSamplesDiv500 = rrSamples.toDouble() / 500.0
                         val rrMs = rrSamples * 1000.0 / latestSamplingRateHz
-                        writer.appendLine("$index,$rrSamples,${"%.2f".format(rrMs)}")
+                        writer.appendLine("$index,${"%.6f".format(rrSamplesDiv500)},${"%.2f".format(rrMs)}")
                     }
                 }
             }

@@ -1,6 +1,7 @@
 # CSV Reader Android App (Kotlin)
 
 버튼을 누르면 CSV 파일을 선택하고, ECG 데이터를 텍스트와 2개의 라인 차트로 표시하는 안드로이드 스튜디오 프로젝트입니다.
+Made By HONG. 26.03.03
 
 ## 동작 방식
 1. `CSV 파일 선택` 버튼 클릭
