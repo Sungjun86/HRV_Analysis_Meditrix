@@ -1,0 +1,4 @@
+com.example.csvreader.test.app-androidTest-0 C:\Users\hongs\StudioProjects\HRV_Analysis_Meditrix_v7\app\build\generated\res\resValues\androidTest\debug
+com.example.csvreader.test.app-mergeDebugAndroidTestResources-1 C:\Users\hongs\StudioProjects\HRV_Analysis_Meditrix_v7\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\merged.dir
+com.example.csvreader.test.app-mergeDebugAndroidTestResources-2 C:\Users\hongs\StudioProjects\HRV_Analysis_Meditrix_v7\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\stripped.dir
+com.example.csvreader.test.app-debugAndroidTest-3 C:\Users\hongs\StudioProjects\HRV_Analysis_Meditrix_v7\app\build\intermediates\merged_res\debugAndroidTest\mergeDebugAndroidTestResources
