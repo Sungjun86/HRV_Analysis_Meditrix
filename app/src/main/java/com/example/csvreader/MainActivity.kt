@@ -5,7 +5,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.github.mikephil.charting.charts.LineChart
@@ -15,183 +14,70 @@ import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import kotlin.math.PI
-import kotlin.math.roundToInt
-import kotlin.math.PI
-import kotlin.math.roundToInt
-import kotlin.math.sqrt
-import kotlin.math.sin
-import kotlin.math.cos
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.round
-import kotlin.math.roundToInt
-import kotlin.math.pow
-import kotlin.math.exp
-import kotlin.math.log
-import kotlin.math.log10
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var chart: LineChart
     private lateinit var resultTextView: TextView
-    private lateinit var panTompkinsTextView: TextView
-    private lateinit var rawChart: LineChart
-    private lateinit var processedChart: LineChart
-
-    private var latestRrIntervalsSamples: List<Int> = emptyList()
-    private var latestSamplingRateHz: Int = 500
 
     private val openCsvLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let { readCsvFile(it) }
-    }
-
-    private val saveRrCsvLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri: Uri? ->
-        uri?.let { saveRrIntervalsToCsv(it) }
+        uri?.let { readCsvAndRenderGraph(it) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        chart = findViewById(R.id.lineChartCsv)
         resultTextView = findViewById(R.id.tvResult)
-        panTompkinsTextView = findViewById(R.id.tvPanTompkins)
-        rawChart = findViewById(R.id.lineChartRaw)
-        processedChart = findViewById(R.id.lineChartProcessed)
 
-        setupChart(rawChart, getString(R.string.raw_chart_description))
-        setupChart(processedChart, getString(R.string.processed_chart_description))
+        setupChart()
 
         val selectButton: Button = findViewById(R.id.btnSelectCsv)
-        val saveRrButton: Button = findViewById(R.id.btnSaveRrCsv)
-
         selectButton.setOnClickListener {
             openCsvLauncher.launch(arrayOf("text/*", "application/vnd.ms-excel"))
         }
-
-        saveRrButton.setOnClickListener {
-            if (latestRrIntervalsSamples.isEmpty()) {
-                Toast.makeText(this, getString(R.string.no_rr_data_to_save), Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            saveRrCsvLauncher.launch("rr_intervals.csv")
-        }
     }
 
-    private fun setupChart(chart: LineChart, descriptionText: String) {
+    private fun setupChart() {
         chart.setNoDataText(getString(R.string.default_guide))
         chart.axisRight.isEnabled = false
-        chart.description = Description().apply { text = descriptionText }
         chart.legend.isEnabled = false
+        chart.description = Description().apply { text = getString(R.string.chart_description) }
     }
 
-    private fun readCsvFile(uri: Uri) {
-        val textContent = StringBuilder()
-        val ecgValues = mutableListOf<Float>()
+    private fun readCsvAndRenderGraph(uri: Uri) {
+        val values = mutableListOf<Float>()
+        var totalRows = 0
 
         contentResolver.openInputStream(uri)?.use { inputStream ->
             BufferedReader(InputStreamReader(inputStream)).use { reader ->
-                var line: String?
-                var previewCount = 0
+                reader.lineSequence().forEach { line ->
+                    totalRows++
+                    val numeric = line
+                        .split(",")
+                        .firstNotNullOfOrNull { it.trim().toFloatOrNull() }
 
-                while (reader.readLine().also { line = it } != null) {
-                    val row = line ?: continue
-                    val columns = row.split(",")
-
-                    if (previewCount < 150) {
-                        textContent.append(columns.joinToString(" | ")).append("\n")
-                        previewCount++
-                    }
-
-                    extractNumericValue(columns)?.let { ecgValues.add(it) }
+                    if (numeric != null) values.add(numeric)
                 }
             }
-
-            resultTextView.text = if (textContent.isNotEmpty()) {
-                textContent.toString()
-            } else {
-                getString(R.string.empty_csv)
-            }
-
-            if (ecgValues.isEmpty()) {
-                latestRrIntervalsSamples = emptyList()
-                panTompkinsTextView.text = getString(R.string.no_numeric_data)
-                rawChart.clear()
-                processedChart.clear()
-                rawChart.invalidate()
-                processedChart.invalidate()
-                return
-            }
-
-            renderChart(
-                chart = rawChart,
-                entries = ecgValues.mapIndexed { index, value -> Entry(index.toFloat(), value) },
-                lineColor = Color.parseColor("#1E88E5"),
-                label = "Raw ECG"
-            )
-
-            val panTompkinsResult = runPanTompkins(ecgValues, samplingRateHz = 500)
-            latestRrIntervalsSamples = panTompkinsResult.rrIntervalsSamples
-            latestSamplingRateHz = panTompkinsResult.samplingRateHz
-
-            renderChart(
-                chart = processedChart,
-                entries = panTompkinsResult.integratedSignal.mapIndexed { index, value -> Entry(index.toFloat(), value) },
-                lineColor = Color.parseColor("#D81B60"),
-                label = "Pan-Tompkins Integrated"
-            )
-
-            panTompkinsTextView.text = buildPanTompkinsSummary(panTompkinsResult)
-        } ?: run {
-            latestRrIntervalsSamples = emptyList()
-            resultTextView.text = getString(R.string.cannot_open_file)
-            panTompkinsTextView.text = getString(R.string.cannot_open_file)
-            rawChart.clear()
-            processedChart.clear()
-            rawChart.invalidate()
-            processedChart.invalidate()
         }
-    }
 
-    private fun saveRrIntervalsToCsv(uri: Uri) {
-        runCatching {
-            contentResolver.openOutputStream(uri)?.use { outputStream ->
-                OutputStreamWriter(outputStream).use { writer ->
-                    writer.appendLine("index,rr_interval_samples,rr_interval_ms")
-                    latestRrIntervalsSamples.forEachIndexed { index, rrSamples ->
-                        val rrMs = rrSamples * 1000.0 / latestSamplingRateHz
-                        writer.appendLine("$index,$rrSamples,${"%.2f".format(rrMs)}")
-                    }
-                }
-            }
-        }.onSuccess {
-            Toast.makeText(this, getString(R.string.rr_csv_saved), Toast.LENGTH_SHORT).show()
-        }.onFailure {
-            Toast.makeText(this, getString(R.string.rr_csv_save_failed), Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun extractNumericValue(columns: List<String>): Float? {
-        return columns.firstNotNullOfOrNull { cell ->
-            cell.trim().toFloatOrNull()
-        }
-    }
-
-    private fun renderChart(chart: LineChart, entries: List<Entry>, lineColor: Int, label: String) {
-        if (entries.isEmpty()) {
+        if (values.isEmpty()) {
+            resultTextView.text = getString(R.string.no_numeric_data)
             chart.clear()
             chart.invalidate()
             return
         }
 
-        val dataSet = LineDataSet(entries, label).apply {
-            color = lineColor
-            valueTextColor = Color.parseColor("#111111")
+        val entries = values.mapIndexed { index, value ->
+            Entry(index.toFloat(), value)
+        }
+
+        val dataSet = LineDataSet(entries, getString(R.string.chart_label)).apply {
+            color = Color.parseColor("#1E88E5")
             lineWidth = 2f
             setDrawCircles(false)
             setDrawValues(false)
@@ -200,185 +86,11 @@ class MainActivity : AppCompatActivity() {
 
         chart.data = LineData(dataSet)
         chart.invalidate()
-    }
 
-    private fun runPanTompkins(ecg: List<Float>, samplingRateHz: Int): PanTompkinsResult {
-        if (ecg.size < samplingRateHz / 2) {
-            return PanTompkinsResult(
-                integratedSignal = emptyList(),
-                peakIndices = emptyList(),
-                rrIntervalsSamples = emptyList(),
-                threshold = 0f,
-                estimatedHeartRate = 0,
-                samplingRateHz = samplingRateHz
-            )
-        }
-
-        val lowPassed = lowPassFilter(ecg, cutoffHz = 15.0, samplingRateHz = samplingRateHz)
-        val bandPassed = highPassFilter(lowPassed, cutoffHz = 5.0, samplingRateHz = samplingRateHz)
-        val derivative = derivativeFilter(bandPassed, samplingRateHz)
-        val squared = derivative.map { it * it }
-
-        val windowSize = (0.15 * samplingRateHz).roundToInt().coerceAtLeast(1)
-        val integrated = movingAverage(squared, windowSize)
-
-        val peakCandidates = findLocalPeaks(integrated)
-        val initialSegment = integrated.take((2.0 * samplingRateHz).roundToInt().coerceAtMost(integrated.size))
-        var spki = (initialSegment.maxOrNull() ?: 0f) * 0.25f
-        var npki = initialSegment.average().toFloat() * 0.5f
-        var thresholdI1 = npki + 0.25f * (spki - npki)
-
-        val refractorySamples = (0.2 * samplingRateHz).roundToInt()
-        val detectedPeaks = mutableListOf<Int>()
-        var lastPeakIndex = -refractorySamples
-
-        for (idx in peakCandidates) {
-            val peakValue = integrated[idx]
-            val outsideRefractory = idx - lastPeakIndex >= refractorySamples
-
-            if (peakValue >= thresholdI1 && outsideRefractory) {
-                detectedPeaks.add(idx)
-                spki = 0.125f * peakValue + 0.875f * spki
-                lastPeakIndex = idx
-            } else {
-                npki = 0.125f * peakValue + 0.875f * npki
-            }
-
-            thresholdI1 = npki + 0.25f * (spki - npki)
-        }
-
-        val rrIntervals = detectedPeaks.zipWithNext { a, b -> b - a }
-        val avgRr = rrIntervals.averageOrNull() ?: 0.0
-        val estimatedHeartRate = if (avgRr > 0) {
-            (60.0 * samplingRateHz / avgRr).roundToInt()
-        } else {
-            0
-        }
-
-        return PanTompkinsResult(
-            integratedSignal = integrated,
-            peakIndices = detectedPeaks,
-            rrIntervalsSamples = rrIntervals,
-            threshold = thresholdI1,
-            estimatedHeartRate = estimatedHeartRate,
-            samplingRateHz = samplingRateHz
+        resultTextView.text = getString(
+            R.string.load_summary,
+            totalRows,
+            values.size
         )
     }
-
-    private fun lowPassFilter(signal: List<Float>, cutoffHz: Double, samplingRateHz: Int): List<Float> {
-        val dt = 1.0 / samplingRateHz
-        val rc = 1.0 / (2.0 * PI * cutoffHz)
-        val alpha = (dt / (rc + dt)).toFloat()
-
-        val out = MutableList(signal.size) { 0f }
-        if (signal.isEmpty()) return out
-        out[0] = signal[0]
-        for (i in 1 until signal.size) {
-            out[i] = out[i - 1] + alpha * (signal[i] - out[i - 1])
-        }
-        return out
-    }
-
-    private fun highPassFilter(signal: List<Float>, cutoffHz: Double, samplingRateHz: Int): List<Float> {
-        val dt = 1.0 / samplingRateHz
-        val rc = 1.0 / (2.0 * Math.PI * cutoffHz)
-        val alpha = rc / (rc + dt)   // Double로 유지 (안정적)
-
-        val out = MutableList(signal.size) { 0f }
-
-        var yPrev = 0.0
-        var xPrev = signal[0].toDouble()
-        out[0] = 0f  // <-- 핵심: high-pass는 보통 0으로 시작
-
-        for (i in 1 until signal.size) {
-            val x = signal[i].toDouble()
-            val y = alpha * (yPrev + x - xPrev)
-            out[i] = y.toFloat()
-            yPrev = y
-            xPrev = x
-        }
-        return out
-    }
-
-    private fun derivativeFilter(signal: List<Float>, samplingRateHz: Int): List<Float> {
-        val out = MutableList(signal.size) { 0f }
-        if (signal.size < 5) return out
-
-        val t = 1f / samplingRateHz
-        for (i in 4 until signal.size) {
-            // Causal form of Pan-Tompkins derivative approximation
-            out[i] = (signal[i] + (2f*signal[i - 1]) - (2f*signal[i - 3]) - (1f*signal[i - 4])) / (8f * t)
-        }
-        return out
-    }
-
-    private fun movingAverage(signal: List<Float>, windowSize: Int): List<Float> {
-        val out = MutableList(signal.size) { 0f }
-        if (signal.isEmpty()) return out
-
-        var runningSum = 0f
-        for (i in signal.indices) {
-            runningSum += signal[i]
-            if (i >= windowSize) {
-                runningSum -= signal[i - windowSize]
-            }
-            val divisor = if (i + 1 < windowSize) i + 1 else windowSize
-            out[i] = runningSum / divisor
-        }
-        return out
-    }
-
-    private fun findLocalPeaks(signal: List<Float>): List<Int> {
-        if (signal.size < 3) return emptyList()
-        val peaks = mutableListOf<Int>()
-        for (i in 1 until signal.lastIndex) {
-            if (signal[i] > signal[i - 1] && signal[i] >= signal[i + 1]) {
-                peaks.add(i)
-            }
-        }
-        return peaks
-    }
-
-    private fun buildPanTompkinsSummary(result: PanTompkinsResult): String {
-        val peaksPreview = if (result.peakIndices.isEmpty()) {
-            getString(R.string.no_detected_peak)
-        } else {
-            result.peakIndices.take(20).joinToString(", ")
-        }
-
-        val rrPreview = if (result.rrIntervalsSamples.isEmpty()) {
-            getString(R.string.no_detected_peak)
-        } else {
-            result.rrIntervalsSamples.take(10).joinToString(", ") { rr ->
-                val rrMs = rr * 1000.0 / result.samplingRateHz
-                "${"%.1f".format(rrMs)}ms"
-            }
-        }
-
-        return """
-            [Pan & Tompkins 결과]
-            - Sampling Rate: ${result.samplingRateHz} Hz
-            - Pre-Processing: Band-pass (HPF 5Hz + LPF 15Hz), Derivative, Squaring, MWI(150ms)
-            - Adaptive Threshold: ${"%.5f".format(result.threshold)}
-            - 검출된 R-peak 수: ${result.peakIndices.size}
-            - RR interval 수: ${result.rrIntervalsSamples.size}
-            - RR 미리보기(최대 10개): $rrPreview
-            - 추정 심박수(BPM): ${result.estimatedHeartRate}
-            - R-peak Index(최대 20개): $peaksPreview
-        """.trimIndent()
-    }
-}
-
-data class PanTompkinsResult(
-    val integratedSignal: List<Float>,
-    val peakIndices: List<Int>,
-    val rrIntervalsSamples: List<Int>,
-    val threshold: Float,
-    val estimatedHeartRate: Int,
-    val samplingRateHz: Int
-)
-
-private fun List<Int>.averageOrNull(): Double? {
-    if (isEmpty()) return null
-    return average()
 }

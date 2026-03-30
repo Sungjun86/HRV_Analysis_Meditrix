@@ -10,57 +10,27 @@
         android:orientation="vertical"
         android:padding="16dp">
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:text="@string/app_name"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
         <Button
             android:id="@+id/btnSelectCsv"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:text="@string/select_csv" />
 
-        <Button
-            android:id="@+id/btnSaveRrCsv"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/save_rr_csv" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="@string/raw_chart_title"
-            android:textStyle="bold" />
-
         <com.github.mikephil.charting.charts.LineChart
-            android:id="@+id/lineChartRaw"
+            android:id="@+id/lineChartCsv"
             android:layout_width="match_parent"
-            android:layout_height="220dp"
-            android:layout_marginTop="8dp"
-            android:background="#FFFFFF" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="260dp"
             android:layout_marginTop="12dp"
-            android:text="@string/processed_chart_title"
-            android:textStyle="bold" />
-
-        <com.github.mikephil.charting.charts.LineChart
-            android:id="@+id/lineChartProcessed"
-            android:layout_width="match_parent"
-            android:layout_height="220dp"
-            android:layout_marginTop="8dp"
             android:background="#FFFFFF" />
-
-        <TextView
-            android:id="@+id/tvPanTompkins"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="#E9F2FF"
-            android:padding="12dp"
-            android:text="@string/pan_tompkins_default"
-            android:textColor="#111111"
-            android:textSize="14sp" />
 
         <TextView
             android:id="@+id/tvResult"
