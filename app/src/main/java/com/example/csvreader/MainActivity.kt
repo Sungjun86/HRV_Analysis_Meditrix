@@ -16,8 +16,8 @@ import com.github.mikephil.charting.data.LineDataSet
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
-import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class MainActivity : AppCompatActivity() {
 
@@ -266,34 +266,113 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun lowPassFilter(signal: List<Float>, cutoffHz: Double, samplingRateHz: Int): List<Float> {
-        val dt = 1.0 / samplingRateHz
-        val rc = 1.0 / (2.0 * PI * cutoffHz)
-        val alpha = (dt / (rc + dt)).toFloat()
-
-        val out = MutableList(signal.size) { 0f }
-        if (signal.isEmpty()) return out
-        out[0] = signal[0]
-        for (i in 1 until signal.size) {
-            out[i] = out[i - 1] + alpha * (signal[i] - out[i - 1])
-        }
-        return out
+        val firKernel = designButterworthLikeFirKernel(
+            cutoffHz = cutoffHz,
+            samplingRateHz = samplingRateHz,
+            order = 3,
+            type = FirType.LOW_PASS,
+            baseTapCount = 41
+        )
+        return applyFirFilter(signal, firKernel)
     }
 
     private fun highPassFilter(signal: List<Float>, cutoffHz: Double, samplingRateHz: Int): List<Float> {
-        val dt = 1.0 / samplingRateHz
-        val rc = 1.0 / (2.0 * PI * cutoffHz)
-        val alpha = (rc / (rc + dt)).toFloat()
+        val firKernel = designButterworthLikeFirKernel(
+            cutoffHz = cutoffHz,
+            samplingRateHz = samplingRateHz,
+            order = 3,
+            type = FirType.HIGH_PASS,
+            baseTapCount = 41
+        )
+        return applyFirFilter(signal, firKernel)
+    }
 
+    private fun designButterworthLikeFirKernel(
+        cutoffHz: Double,
+        samplingRateHz: Int,
+        order: Int,
+        type: FirType,
+        baseTapCount: Int
+    ): List<Float> {
+        val normalizedCutoff = (cutoffHz / samplingRateHz).coerceIn(0.001, 0.499)
+        val baseKernel = designWindowedSincLowPass(normalizedCutoff, baseTapCount)
+
+        // 3차 Butterworth와 유사한 roll-off를 만들기 위해 low-pass kernel을 order번 컨볼루션
+        var kernel = baseKernel
+        repeat(order - 1) {
+            kernel = convolve(kernel, baseKernel)
+        }
+
+        val lowPassKernel = normalizeKernel(kernel)
+        return when (type) {
+            FirType.LOW_PASS -> lowPassKernel
+            FirType.HIGH_PASS -> spectralInvert(lowPassKernel)
+        }
+    }
+
+    private fun designWindowedSincLowPass(normalizedCutoff: Double, tapCount: Int): List<Float> {
+        val size = if (tapCount % 2 == 0) tapCount + 1 else tapCount
+        val center = size / 2
+        val kernel = MutableList(size) { 0f }
+
+        for (n in 0 until size) {
+            val k = n - center
+            val sinc = if (k == 0) {
+                2.0 * normalizedCutoff
+            } else {
+                sin(2.0 * Math.PI * normalizedCutoff * k) / (Math.PI * k)
+            }
+            val hamming = 0.54 - 0.46 * kotlin.math.cos(2.0 * Math.PI * n / (size - 1))
+            kernel[n] = (sinc * hamming).toFloat()
+        }
+
+        return normalizeKernel(kernel)
+    }
+
+    private fun normalizeKernel(kernel: List<Float>): List<Float> {
+        val sum = kernel.sum().takeIf { it != 0f } ?: 1f
+        return kernel.map { it / sum }
+    }
+
+    private fun spectralInvert(lowPassKernel: List<Float>): List<Float> {
+        val center = lowPassKernel.size / 2
+        return lowPassKernel.mapIndexed { index, value ->
+            if (index == center) 1f - value else -value
+        }
+    }
+
+    private fun convolve(a: List<Float>, b: List<Float>): List<Float> {
+        val result = MutableList(a.size + b.size - 1) { 0f }
+        for (i in a.indices) {
+            for (j in b.indices) {
+                result[i + j] += a[i] * b[j]
+            }
+        }
+        return result
+    }
+
+    private fun applyFirFilter(signal: List<Float>, kernel: List<Float>): List<Float> {
+        if (signal.isEmpty()) return emptyList()
+
+        val kSize = kernel.size
+        val kHalf = kSize / 2
         val out = MutableList(signal.size) { 0f }
-        if (signal.isEmpty()) return out
-        out[0] = signal[0]
-        for (i in 1 until signal.size) {
-            out[i] = alpha * (out[i - 1] + signal[i] - signal[i - 1])
+
+        for (i in signal.indices) {
+            var acc = 0f
+            for (k in kernel.indices) {
+                val srcIndex = (i + k - kHalf).coerceIn(0, signal.lastIndex)
+                acc += signal[srcIndex] * kernel[k]
+            }
+            out[i] = acc
         }
         return out
     }
 
+    private enum class FirType { LOW_PASS, HIGH_PASS }
+
     private fun derivativeFilter(signal: List<Float>, samplingRateHz: Int): List<Float> {
+
         val out = MutableList(signal.size) { 0f }
         if (signal.size < 5) return out
 
@@ -351,7 +430,7 @@ class MainActivity : AppCompatActivity() {
             [Pan & Tompkins 결과]
             - Sampling Rate: ${result.samplingRateHz} Hz
             - Pan-Tompkins Start Offset: ${panTompkinsStartOffset} samples
-            - Pre-Processing: Band-pass (HPF 5Hz + LPF 15Hz), Derivative, Squaring, MWI(150ms)
+            - Pre-Processing: 3rd-order Butterworth-like FIR Band-pass (HPF 5Hz + LPF 15Hz), Derivative, Squaring, MWI(150ms)
             - Adaptive Threshold: ${"%.5f".format(result.threshold)}
             - 검출된 R-peak 수: ${result.peakIndices.size}
             - RR interval 수: ${result.rrIntervalsSamples.size}

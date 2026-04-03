@@ -13,7 +13,7 @@
 7. `RR Interval CSV 저장` 버튼으로 RR interval 결과를 CSV 파일로 저장
 
 ## Pan & Tompkins 처리(샘플링 500Hz)
-- Pre-Processing: Band-pass (HPF 5Hz + LPF 15Hz)
+- Pre-Processing: 3차 Butterworth 유사 FIR Band-pass (HPF 5Hz + LPF 15Hz)
 - Derivative Filter
 - Squaring
 - Moving Window Integration (150ms)
