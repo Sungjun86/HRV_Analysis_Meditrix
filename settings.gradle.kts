@@ -1,14 +1,4 @@
 pluginManagement {
-    resolutionStrategy {
-        eachPlugin {
-            when (requested.id.id) {
-                "com.android.application", "com.android.library", "com.android.test", "com.android.dynamic-feature" -> {
-                    useModule("com.android.tools.build:gradle:${requested.version}")
-                }
-            }
-        }
-    }
-
     repositories {
         google()
         mavenCentral()
