@@ -1,0 +1,30 @@
+R_DEF: Internal format may change without notice
+local
+color ic_launcher_background
+id btnSaveRrCsv
+id btnSelectCsv
+id lineChartProcessed
+id lineChartRaw
+id tvPanTompkins
+id tvResult
+layout activity_main
+mipmap ic_launcher
+mipmap ic_launcher_foreground
+mipmap ic_launcher_round
+string app_name
+string cannot_open_file
+string default_guide
+string empty_csv
+string no_detected_peak
+string no_numeric_data
+string no_rr_data_to_save
+string pan_tompkins_default
+string processed_chart_description
+string processed_chart_title
+string raw_chart_description
+string raw_chart_title
+string rr_csv_save_failed
+string rr_csv_saved
+string save_rr_csv
+string select_csv
+style Theme.CsvReader
